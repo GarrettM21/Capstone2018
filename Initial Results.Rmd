@@ -1,0 +1,194 @@
+---
+title: "CMTH642 Assignment 3"
+author: "Garrett Mangulins - 500925990"
+date: "October 30, 2018"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+###
+Preperation:
+The dataset is used in association with the 2018 Autumn Capstone Course CKME136.
+
+###
+Importing the data set
+```{r}
+df <- read.csv("C:\\Users\\Garrett Mangulins\\Documents\\MCI_2014_to_2017.csv", header=TRUE, sep=",")
+View(df)
+```
+
+##########
+QUESTION 1
+##########
+Check data characteristics. Is there missing data?
+```{r}
+str(df)
+```
+The data is separated into "int", "num" and "factor" type variables
+
+I don't need all of the columns for my Prediction Model. Here I drop irrelevent attributes:
+
+```{r}
+df.clean <- df[ , which(names(df) %in% c("premisetype", "offence", "reportedyear", "reportedmonth", "reportedday", "occurrenceyear", "occurrencemonth", "occurenceday", "MCI", "Hood_ID", "Neighbourhood"))]
+
+View(df.clean)
+```
+
+
+Now to check if there is any missing data:
+(I wrote this function during the course portion of the Big Data Certificate to go through a data set and check for NULL values)
+```{r}
+Check.Missing <- function(mydata){
+  check <- sum(is.na(mydata)) #I create a sum if there is a missing value present in the data
+  if(check == 0) {
+    print("There are no missing values in the data set provided.")
+  }
+  else{
+    paste0("There are: ", check, " missing values in the data set. The rows with missing values can be found here", mydata, ".Missing")
+    df.Missing <- df[rowSums(is.na(mydata)) > 0,]
+    View(df.Missing)
+  }
+} # Function I wrote in 123 to check a dataframe for NA values
+
+Check.Missing(df.clean)
+```
+
+#######
+It will be important going forward figuring out how exaclty I will deal with the data that is missing. I could either just not include the data, as it is a very small subset of the dataset, or I could find a way to impute data into it/guess the values.
+My plan at the moment is to remove these rows from the data set.
+
+*** Need to write a script to remove the rows with the same indicies as the rows with NULL values.
+As of right now Iwrote in the missing rows by hand, but making this automated will result in a better project overall.
+
+```{r}
+df.cleaner <- df.clean[-c(1063,1064,1065,1108,1131,1132,1196,1197,1198,1199,1257,1258,1259,1260,1343,1344,1345,1403,1425,1742,1743,1744,1745,1950,1951,1952,1953,1954,3839,3840,11889,11890,11891,15880,15881,15882,15883,110115,110126,113749),]
+```
+Check to see if I removed all the rows with MULL values:
+```{r}
+Check.Missing(df.cleaner)
+```
+The message that there are no NULL values present was displayed.
+
+
+**Here I am just looking into different packages R provides for predictive modelling.
+
+I want to be able to predict the MCI (Major Crime Indicator) based on the Occurance/Reported Year/Month/Day as well as with the Neighbourhood, the Premise Type
+```{r}
+#install.packages("randomForest")
+suppressmessage(library(randomForest))
+
+model <- randomForest(y=as.factor(df.cleaner$MCI),x=cbind(as.factor(df.cleaner$premisetype),as.factor(df.cleaner$Neighbourhood)),ntree=10)
+
+
+plot(model)
+#Here I plot the confussion matrix of the regression
+model$confusion
+```
+
+
+
+This is a Decision Tree Package I found online:
+```{r}
+#install.packages("rpart")
+
+library(rpart)
+
+#Create a Decision Tree from specific attributes
+fit <- rpart(MCI~occurrencemonth+premisetype,df.cleaner)
+
+#View the classification results
+printcp(fit)
+#View cross-validation results
+plotcp(fit)
+
+#Plot the tree
+plot(fit, uniform=TRUE,
+     main="Classification Tree for MCI")
+text(fit, use.n=TRUE, all=TRUE, cex=.6)
+```
+Decision Trees do not appear to be the best choice of prediction model for this dataset. A Decision tree works best when many of the variables are binary in their choices.
+
+
+
+
+K-Nearest Neighbours
+
+*** The struggle with KNN is that the attributes have to be scalar in value. This means I have to assign a number to each of the attributes in a category.
+This si not that difficult, as MCI only contians 4 different categories, months can be represented as numbers, and premisetype and offence can also be described as a number.
+
+```{r}
+#install.packages("data.table")
+library(data.table)
+
+df.cleaner$MCIfactor <- ifelse(df.cleaner$MCI %like% "Assault",1,
+                                       ifelse(df.cleaner$MCI %like% "Break and Enter", 2,
+                                              ifelse(df.cleaner$MCI %like% "Robbery",3,
+                                                     ifelse(df.cleaner$MCI %like% "Auto Theft",4,
+                                                            ifelse(df.cleaner$MCI %like% "Theft Over",5,0
+                                                                   )))))
+
+df.cleaner$premisetypefactor <- ifelse(df.cleaner$premisetype %like% "House",1,
+                                       ifelse(df.cleaner$premisetype %like% "Apartment", 2,
+                                              ifelse(df.cleaner$premisetype %like% "Commercial",3,
+                                                     ifelse(df.cleaner$premisetype %like% "Outside",4,
+                                                            ifelse(df.cleaner$premisetype %like% "Other",5,0
+                                                                   )))))
+
+df.cleaner$monthfactor <- ifelse(df.cleaner$occurrencemonth %like% "January",1,
+                                       ifelse(df.cleaner$occurrencemonth %like% "February", 2,
+                                        ifelse(df.cleaner$occurrencemonth %like% "March",3,
+                                         ifelse(df.cleaner$occurrencemonth %like% "April",4,
+                                          ifelse(df.cleaner$occurrencemonth %like% "May",5,
+                                           ifelse(df.cleaner$occurrencemonth %like% "June",6,
+                                            ifelse(df.cleaner$occurrencemonth %like% "July",7,                                                                ifelse(df.cleaner$occurrencemonth %like% "August",8,
+                                            ifelse(df.cleaner$occurrencemonth %like% "September",9,             
+                                              ifelse(df.cleaner$occurrencemonth %like% "October",10,
+                                              ifelse(df.cleaner$occurrencemonth %like% "November",11,
+                                              ifelse(df.cleaner$occurrencemonth %like% "December",12,0))))))))))))
+
+View(df.cleaner)
+```
+
+*** Time permitting, look into cleaner way to make factors for the categorical values.
+ 
+
+Now that I have my categorical data as Factors
+```{r}
+
+#First I want to take only the factor columns
+
+df.factors <- df.cleaner[,c(8,11,12,13)]
+
+# Here I create a random sample from the normalized dataset. I am making a 70/30 split for the training and testing sets
+df.split <- sample(nrow(df.factors), floor(nrow(df.factors)*0.7))
+
+## Need to make the attributes here numeric.
+## Use as.Numeric to do so
+
+df.train <- df.factors[df.split,]
+df.test <- df.factors[-df.split,]
+
+View(df.train)
+
+df.train.labels <- df.train[,1]
+df.test.labels <- df.test[,1]
+
+Check.Missing(df.split)
+```
+
+```{r}
+#install.packages("class")
+#install.packages("gmodels")
+library(class)
+library(gmodels)
+# First create a prediction model using the knn function. As of right now it does not work.
+prediction.test <- knn(train=df.train, test=df.test, cl=df.train.labels, k=10)
+
+# Next we produce a table which shows how the 
+CrossTable(x=df.test.labels, y=prediction.test, prop.chisq=FALSE)
+```
+
