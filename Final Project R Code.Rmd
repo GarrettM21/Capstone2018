@@ -1,0 +1,262 @@
+---
+title: "Capstone_Final_Project"
+output: pdf_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+First install all the packages that I will be using
+```{r}
+#install.packages("caret")
+#install.packages("caret", dependencies = c("Depends", "Suggests"))
+#install.packages("lattice")
+#install.packages("questionr")
+#install.packages("promises")
+#install.packages("car")
+#install.packages("afex")
+
+# To use the caret package I always need to run the lattice package first weirdly enough///
+library(lattice)
+library(caret)
+library('RANN')
+library(AER)
+require(foreign)
+require(nnet)
+require(ggplot2)
+require(reshape2)
+library(Metrics)
+library(randomForest)
+library(klaR)
+library(afex)
+```
+
+###
+Importing the data set
+```{r}
+df <- read.csv("C:\\Users\\Garrett Mangulins\\Documents\\MCI_2014_to_2017.csv", header=TRUE, sep=",")
+## Data can be found here: http://data.torontopolice.on.ca/datasets/mci-2014-to-2017
+
+#This is to look at the dataset
+View(df)
+
+#Check data characteristics:
+#str(df)
+```
+
+
+I don't need all of the columns for my Prediction Model. Here I keep the relevent attributes:
+```{r}
+df.vintage <- df[, which(names(df) %in% c('occurrenceyear',	'occurrencemonth', 'occurrenceday', 'occurrencedayofyear', 'occurrencedayofweek', 'occurrencehour', 'MCI', 'Division',	'Hood_ID', 'premisetype'))]
+
+#Only want the data the is greater than 2013
+df.vintage <- df.vintage[df.vintage$occurrenceyear > 2013,]
+```
+
+
+Now to check if there is any missing data:
+(I wrote this function during the course portion of the Big Data Certificate to go through a data set and check for NULL values)
+Using this function I can see that there are infact NULL values within the dataset.
+```{r}
+Check.Missing <- function(mydata){
+  check <- sum(is.na(mydata)) #I create a sum if there is a missing value present in the data
+  if(check == 0) {
+    print("There are no missing values in the data set provided.")
+  }
+  else{
+    paste0("There are: ", check, " rows with missing values in the data set.")
+  }
+} # Function I wrote in 123 to check a dataframe for NA values
+
+Check.Missing(df.clean)
+```
+
+
+Here I will fill the missing/NULL values using a KNN algorithm. A method of centering and scaling the numerical columns will also be done.
+```{r}
+# Count how many rows have NULL values in them
+sum(is.na(df.vintage))
+# There are 400 rows with a NULL value in it. I will remove these as 400/131073 is only 0.3% of the dataset
+df.vintage <- df.vintage[complete.cases(df.vintage),]
+#The number of NULL values is now zero.
+sum(is.na(df.vintage))
+```
+
+
+Convert all the attributes to factors
+```{r}
+df.vintage[,c('occurrenceyear',	'occurrencemonth', 'occurrenceday', 'occurrencedayofyear', 'occurrencedayofweek', 'occurrencehour', 'MCI', 'Division',	'Hood_ID', 'premisetype')] <- lapply(df.vintage[,c('occurrenceyear',	'occurrencemonth', 'occurrenceday', 'occurrencedayofyear', 'occurrencedayofweek', 'occurrencehour', 'MCI', 'Division',	'Hood_ID', 'premisetype')], factor)
+str(df.vintage)
+```
+
+Function used to set number values to the MCI factors
+##This function was found online. I did not write this function. It is very useful in the next section however to convert the strings in MCI to numbers with only one line of code. The creater of this function is listed in the reference.
+```{r}
+decode <- function(x, search, replace, default = NULL) {
+
+    # build a nested ifelse function by recursion
+    decode.fun <- function(search, replace, default = NULL)
+        if (length(search) == 0L) {
+            function(x) if (is.null(default)) x else rep(default, length(x))
+        } else {
+            function(x) ifelse(x == search[1L], replace[1L],
+                                                decode.fun(tail(search,  -1L),
+                                                           tail(replace, -1L),
+                                                           default)(x))
+        }
+
+    return(decode.fun(search, replace, default)(x))
+}
+```
+
+
+One Hot Coding
+```{r}
+# First change the MCI category to a numerical value using the function above:
+df.vintage$MCI <- decode(df.vintage$MCI, search = c("Assault", "Break and Enter", "Robbery", "Theft Over", "Auto Theft"),
+       replace = c(1, 2, 3, 4, 5))
+
+# Convert the other categorical attributes to numerical by using a dummy variable
+dummy <- dummyVars(" ~ .", data = df.vintage, fullRank = TRUE)
+df.transformed <- data.frame(predict(dummy, newdata = df.vintage))
+
+# Now change the MCI attribute back to a categorical value
+df.transformed$MCI <- as.factor(df.transformed$MCI)
+str(df.transformed)
+```
+
+
+Now I will split my dataset into a Training and Testing groups. (using a 75% and 25% ratio)
+```{r}
+# Split the data into two groups on a 25:75 ratio
+df.index <- createDataPartition(df.transformed$MCI, p=0.75, list=FALSE)
+# Create the training and testing tables
+df.trainSet <- df.transformed[df.index,]
+df.testSet <- df.transformed[-df.index,]
+```
+
+
+Now that I have a Training and Testing set, I can use a variety of the many learning algorithms:
+
+Random Forest
+```{r}
+# Use the Random Forest Model
+rf.model <- randomForest(MCI~., ntree=100, data = df.trainSet)
+# Check to see if the model ran well
+print(rf.model)
+
+# Check the variable importance
+varImpPlot(rf.model, sort = T, n.var = 15, main = "Top 15 - Variable Importance")
+var.imp <- data.frame(importance(rf.model, type=2))
+var.imp$Variables <- row.names(var.imp)  
+print(var.imp[order(var.imp$MeanDecreaseGini,decreasing = T),])
+
+# Predicting response variable
+rf.predict <- predict(rf.model, df.trainSet)
+print(confusionMatrix(data = rf.predict,
+                reference = df.trainSet$MCI,
+                positive = 'Matched'))
+
+rf.cfm <- table(rf.predict,df.trainSet$MCI)
+rf.accuracy <- sum(diag(rf.cfm)/sum(rf.cfm))
+rf.precision <- diag(rf.cfm/rowSums(rf.cfm))
+rf.recall <- (diag(rf.cfm)/colSums(rf.cfm))
+
+
+# Checking the prediction model for the predictor attributes
+rf.predict.attributes <- predict(rf.model, df.testSet)
+print(confusionMatrix(data = rf.predict.attributes,
+                reference = df.testSet$MCI,
+                positive = 'Matched',
+                mode = "everything"))
+
+# Varibales to compare with the other models
+rf.cfm <- table(rf.predict.attributes,df.testSet$MCI)
+rf.accuracy <- sum(diag(rf.cfm)/sum(rf.cfm))
+rf.accuracy
+rf.precision <- diag(rf.cfm/rowSums(rf.cfm))
+rf.precision
+rf.recall <- (diag(rf.cfm)/colSums(rf.cfm))
+rf.recall
+
+#This is a misclassification error. High is bad.
+mean(as.character(rf.predict) != as.character(df.trainSet$MCI)) #0.138
+```
+
+
+Multinomial Logistic Regression
+```{r}
+# Here I use the nnet package to run a Multinomial Logistic regression
+mnlr.model <- multinom(MCI ~ ., data = df.trainSet, MaxNWts = 5000)
+
+# Predicting response variable
+mnlr.predict <- predict(mnlr.model, df.trainSet)
+print(confusionMatrix(data = mnlr.predict,
+                reference = df.trainSet$MCI,
+                positive = 'Matched'))
+
+
+# Checking the prediction model for the predictor attributes
+mnlr.predict.attributes <- predict(mnlr.model, df.testSet)
+print(confusionMatrix(data = mnlr.predict.attributes,
+                reference = df.testSet$MCI,
+                positive = 'Matched'))
+
+# Varibales to compare with the other models
+mnlr.cfm <- table(mnlr.predict.attributes,df.testSet$MCI)
+mnlr.accuracy <- sum(diag(mnlr.cfm)/sum(mnlr.cfm))
+mnlr.accuracy
+mnlr.precision <- diag(mnlr.cfm/rowSums(mnlr.cfm))
+mnlr.precision
+mnlr.recall <- (diag(mnlr.cfm)/colSums(mnlr.cfm))
+mnlr.recall
+
+#This is a misclassification error. High is bad.
+mean(as.character(mnlr.predict) != as.character(df.trainSet$MCI)) # 0.397
+```
+
+
+Naive-Bayes
+```{r}
+# Here I use the e1071 package to run a Naive-Bayes training model
+library(e1071)
+nb.model <- naiveBayes(MCI ~ ., data = df.trainSet)
+
+# Predicting response variable
+nb.predict <- predict(nb.model, df.trainSet)
+confusionMatrix(nb.predict, df.trainSet$MCI)
+
+# Checking the prediction model for the predictor attributes
+nb.predict.attributes <- predict(nb.model, df.testSet)
+print(confusionMatrix(data = nb.predict.attributes,
+                reference = df.testSet$MCI,
+                positive = 'Matched'))
+
+# Varibales to compare with the other models
+nb.cfm <- table(nb.predict.attributes,df.testSet$MCI)
+nb.accuracy <- sum(diag(nb.cfm)/sum(nb.cfm))
+nb.accuracy
+nb.precision <- diag(nb.cfm/rowSums(nb.cfm))
+nb.precision
+nb.recall <- (diag(nb.cfm)/colSums(nb.cfm))
+nb.recall
+
+#This is a misclassification error. High is bad.
+mean(as.character(nb.predict) != as.character(df.trainSet$MCI)) # 0.768
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
